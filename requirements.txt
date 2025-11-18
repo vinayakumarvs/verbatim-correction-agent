@@ -1,0 +1,15 @@
+streamlit
+python-docx
+openai
+regex
+requests
+modelcontextprotocol
+spacy
+fastmcp
+docx
+
+# The FastMCP package name may vary depending on your MCP SDK.
+# If you use a specific MCP SDK, install it. If not used, mcp_rules.py still works as a local module.
+# For local development no MCP pip package is strictly required.
+# modelcontextprotocol is an example if you use MCP official SDK:
+
