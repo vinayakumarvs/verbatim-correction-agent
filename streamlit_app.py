@@ -10,17 +10,22 @@ from typing import List, Callable, Any
 from llm_client import LLMClient
 from doc_processor import DocProcessor
 from dotenv import load_dotenv
+import threading
 # Load environment variables from .env if present
 load_dotenv()
 
 # Config: module name for MCP tools (default: mcp_rules.py)
 MCP_MODULE_NAME = os.environ.get("MCP_MODULE", "mcp_rules")
+
+# LLM model to use for grammar correction
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
 st.set_page_config(page_title="DOCX: MCP-only Rules + Grammar Processor", layout="wide")
 st.title("DOCX Processor — MCP-only custom rules + LLM grammar")
 st.write("This app applies **only** MCP-provided transformation tools (from `mcp_rules.py`) and optional LLM grammar correction. "
          "Local replacement rules are intentionally excluded.")
+
+
 
 # Discover MCP tool functions from the MCP module (functions that end with '_tool')
 mcp_funcs: List[Callable[[str], Any]] = []

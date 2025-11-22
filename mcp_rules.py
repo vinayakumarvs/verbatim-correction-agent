@@ -1,4 +1,3 @@
-# mcp_rules.py
 from __future__ import annotations
 import os
 import re
@@ -7,20 +6,10 @@ import asyncio
 import spacy
 import random
 from spacy.tokens import Doc, Token
+from mcp.server.fastmcp import FastMCP
 
-# If you have the FastMCP package available, import it. If not, the module still defines functions
-# that Streamlit will detect (async functions with `_tool` suffix). The FastMCP decorator is optional.
-try:
-    from fastmcp import FastMCP
-    mcp = FastMCP(name="Copy Editing AI Agent")
-except Exception:
-    # create a dummy decorator container so the @mcp.tool decorator won't fail at import if FastMCP isn't installed.
-    class _DummyMCP:
-        def tool(self, *args, **kwargs):
-            def _decorator(fn):
-                return fn
-            return _decorator
-    mcp = _DummyMCP()
+
+
 
 # ---- Load Spacy Model ----
 SPACY_model = "en_core_web_sm"
@@ -102,6 +91,9 @@ def replace_abu_dhabi_expand(text: str) -> str:
         else:
             return "abu dhabi sovereign"
     return re.sub(r'\bAbu\s+Dhabi\b', _repl, text, flags=re.IGNORECASE)
+
+# Initialize FastMCP server instance
+mcp = FastMCP("CopyEditingMCP")
 
 # ---- FastMCP tool wrappers ----
 @mcp.tool(

@@ -25,7 +25,7 @@ class LLMClient:
             f"Text:\n{text}\n\nReturn only the corrected text."
         )
         try:
-            resp = openai.ChatCompletion.create(
+            resp = self.chat.completion.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": "You are a grammar correcting assistant."},
