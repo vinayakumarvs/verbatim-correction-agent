@@ -55,6 +55,8 @@ class DocProcessor:
         return text
 
     def process_text(self, orig_text: str, apply_rules_first: bool = True) -> str:
+        if not orig_text or not orig_text.strip():
+            return orig_text
         text = orig_text
         if apply_rules_first:
             text = self._apply_transforms(text)
