@@ -6,15 +6,17 @@ import importlib
 import inspect
 import zipfile
 import io
-# import asyncio
+import threading
+import time
+import random
 from typing import List, Callable, Any
+
+# Import Document to read docx text for Diff View
+from docx import Document
 
 from llm_client import LLMClient
 from doc_processor import DocProcessor
 from dotenv import load_dotenv
-import threading
-import time
-import random
 
 # Load environment variables from .env if present
 load_dotenv()
@@ -29,6 +31,31 @@ st.set_page_config(page_title="DOCX: MCP-only Rules + Grammar Processor", layout
 st.title("DOCX Processor — MCP-only custom rules + LLM grammar")
 st.write("This app applies **only** MCP-provided transformation tools (from `mcp_rules.py`) and optional LLM grammar correction. "
          "Local replacement rules are intentionally excluded.")
+
+
+# --- Helper for Diff View ---
+def extract_text_from_docx(path: str) -> str:
+    """Extracts text from paragraphs and tables for comparison."""
+    try:
+        doc = Document(path)
+        full_text = []
+        
+        # Extract body paragraphs
+        for para in doc.paragraphs:
+            if para.text.strip():
+                full_text.append(para.text)
+        
+        # Extract table text (simple linear extraction)
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for para in cell.paragraphs:
+                        if para.text.strip():
+                            full_text.append(para.text)
+                            
+        return "\n\n".join(full_text)
+    except Exception as e:
+        return f"[Error extraction text: {str(e)}]"
 
 
 # Discover MCP tool functions from the MCP module (functions that end with '_tool')
@@ -87,7 +114,6 @@ with st.sidebar:
 cols = st.columns([1, 2, 1])
 with cols[1]:
     st.header("Process .docx Files")
-    # CHANGED: Added accept_multiple_files=True
     uploaded_files = st.file_uploader("Upload .docx", type=["docx"], accept_multiple_files=True)
     
     if uploaded_files:
@@ -95,8 +121,7 @@ with cols[1]:
         st.info(f"Uploaded {count} file{'s' if count > 1 else ''}")
         
         # Prepare file metadata for processing
-        # We need to save them to temp files first because DocProcessor expects paths
-        input_files_map = [] # List of tuples (temp_input_path, original_filename, temp_output_path)
+        input_files_map = [] 
         
         for uploaded_file in uploaded_files:
             # Save upload to temp file
@@ -118,12 +143,12 @@ with cols[1]:
 
         if st.button(f"Process {count} file{'s' if count > 1 else ''}"):
 
-            # Prepare transform functions (possibly wrapped to handle async)
+            # Prepare transform functions
             transforms = []
             if apply_mcp and mcp_available:
                 transforms = list(mcp_funcs)
 
-            # Prepare LLM client if requested and key exists
+            # Prepare LLM client
             llm = None
             if apply_grammar:
                 if os.getenv("OPENAI_API_KEY"):
@@ -132,9 +157,8 @@ with cols[1]:
                     st.warning("OPENAI_API_KEY not set — grammar step will be skipped.")
                     llm = None
 
-            # Create DocProcessor that uses only MCP transforms and LLM; no local rules manager
             dp = DocProcessor(
-                rules_manager=None,  # explicit: no local replacement rules
+                rules_manager=None, 
                 llm_client=llm,
                 apply_grammar=apply_grammar,
                 mcp_transform_funcs=transforms
@@ -148,8 +172,7 @@ with cols[1]:
 
             def _run_processing():
                 try:
-                    total = len(input_files_map)
-                    for idx, file_info in enumerate(input_files_map):
+                    for file_info in input_files_map:
                         dp.process_docx(
                             file_info["input_path"], 
                             file_info["output_path"], 
@@ -158,15 +181,14 @@ with cols[1]:
                 except Exception as e:
                     result["error"] = e
 
-            # Run processing in a background thread so we can animate progress
+            # Run processing in a background thread
             worker = threading.Thread(target=_run_processing, daemon=True)
             worker.start()
 
-            # Animate progress while worker runs
+            # Animate progress
             pct = 0
             last_update = time.time()
             while worker.is_alive():
-                # increment by a small random amount to feel responsive
                 if time.time() - last_update > 0.25:
                     increment = random.randint(2, 6)
                     pct = min(pct + increment, 95)
@@ -174,16 +196,31 @@ with cols[1]:
                     last_update = time.time()
                 time.sleep(0.1)
 
-            # Ensure thread finished
             worker.join()
 
-            # Finalize progress & show result
             if result["error"] is None:
                 progress_bar.progress(100)
                 status.success("Processing finished.")
                 
+                # --- Diff View Section ---
+                st.subheader("Comparison & Review")
+                for f_info in input_files_map:
+                    with st.expander(f"Review: {f_info['original_name']}", expanded=False):
+                        orig_text = extract_text_from_docx(f_info["input_path"])
+                        proc_text = extract_text_from_docx(f_info["output_path"])
+                        
+                        diff_cols = st.columns(2)
+                        with diff_cols[0]:
+                            st.markdown("**Original Text**")
+                            st.text_area(label="orig", value=orig_text, height=300, disabled=True, key=f"orig_{f_info['input_path']}")
+                        with diff_cols[1]:
+                            st.markdown("**Processed Text**")
+                            st.text_area(label="proc", value=proc_text, height=300, disabled=True, key=f"proc_{f_info['output_path']}")
+
+                # --- Download Section ---
+                st.subheader("Download Results")
                 try:
-                    # If single file, offer direct download
+                    # Single file download
                     if len(input_files_map) == 1:
                         f_info = input_files_map[0]
                         with open(f_info["output_path"], "rb") as f:
@@ -195,7 +232,7 @@ with cols[1]:
                                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                             )
                     
-                    # If multiple files, zip them
+                    # Batch ZIP download
                     else:
                         zip_buffer = io.BytesIO()
                         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -203,7 +240,7 @@ with cols[1]:
                                 zf.write(f_info["output_path"], f"processed_{f_info['original_name']}")
                         
                         st.download_button(
-                            "Download all (ZIP)",
+                            "Download all files (ZIP)",
                             data=zip_buffer.getvalue(),
                             file_name="processed_files.zip",
                             mime="application/zip"
@@ -215,13 +252,11 @@ with cols[1]:
                 progress_bar.progress(100)
                 st.error(f"Processing failed: {result['error']}")
 
-            # Cleanup temp files
+            # Cleanup
             for f_info in input_files_map:
                 try:
                     if os.path.exists(f_info["input_path"]):
                         os.unlink(f_info["input_path"])
-                    # We might want to keep output files until session ends, but normally we can delete after reading into memory
-                    # However, st.download_button reruns script on click, so memory buffer is safer than file path for persistence
                     if os.path.exists(f_info["output_path"]):
                         os.unlink(f_info["output_path"])
                 except Exception:
@@ -232,6 +267,6 @@ with cols[1]:
 
 st.markdown("---")
 st.write("Notes:")
+st.write("- **Diff View** extracts text from document body and tables for a quick side-by-side comparison.")
 st.write("- This app intentionally excludes local replacement rules; only MCP tool functions (from `mcp_rules.py`) are applied.")
-st.write("- MCP tool functions must follow the naming convention `*_tool` and accept a single `text: str` argument.")
 st.write("- LLM grammar correction is applied per text block and may incur API costs.")
